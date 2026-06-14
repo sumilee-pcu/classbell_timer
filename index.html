@@ -142,6 +142,8 @@
 
 <script>
 const STORE_KEY = "zoomBellSchedule_v1";
+const DOW = ["일", "월", "화", "수", "목", "금", "토"]; // getDay() 0=일 … 6=토
+const WEEKDAYS = [1, 2, 3, 4, 5];                      // 월~금
 let schedule = load();
 let armed = false;
 let firedToday = new Set();
@@ -274,8 +276,6 @@ function playPattern(pattern) {
 }
 
 /* ---------- 일정 관리 ---------- */
-const DOW = ["일", "월", "화", "수", "목", "금", "토"]; // getDay() 0=일 … 6=토
-const WEEKDAYS = [1, 2, 3, 4, 5];            // 월~금
 function defaultSchedule() {
   // 기본값: 월~금 50분 수업
   return [
