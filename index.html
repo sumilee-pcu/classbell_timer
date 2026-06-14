@@ -66,6 +66,23 @@
   .status { text-align: center; font-size: 12px; color: var(--muted); margin-top: 8px; min-height: 16px; }
   .preset-btns { display: flex; gap: 6px; flex-wrap: wrap; }
   .preset-btns button { font-size: 12px; padding: 6px 10px; }
+  .weekday { text-align: center; color: var(--accent2); font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+  .days { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; align-items: center; }
+  .days .lab { color: var(--muted); font-size: 12px; margin-right: 2px; }
+  .day-pill {
+    width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line);
+    background: var(--bg); color: var(--muted); cursor: pointer; font-size: 13px; font-weight: 600;
+  }
+  .day-pill.on { background: var(--accent); color: #07223a; border-color: var(--accent); }
+  .day-pill.sun.on { background: #f87171; border-color: #f87171; color: #3a0707; }
+  .day-pill.sat.on { background: #60a5fa; border-color: #60a5fa; color: #07223a; }
+  .day-badge {
+    display: inline-block; font-size: 11px; color: var(--accent2);
+    background: rgba(245,158,11,0.12); border-radius: 5px; padding: 1px 6px; margin-top: 3px;
+  }
+  .todayToggle { font-size: 12px; font-weight: 400; color: var(--muted); float: right; cursor: pointer; }
+  .todayToggle input { vertical-align: middle; }
+  .row.off { opacity: 0.3; }
 </style>
 </head>
 <body>
@@ -74,6 +91,7 @@
   <div class="sub">정해진 시각에 종소리가 자동으로 울립니다. 줌 화면공유 시 <b>"소리 공유"</b>를 켜야 학생에게 들립니다.</div>
 
   <div class="clock" id="clock">--:--:--</div>
+  <div class="weekday" id="weekday"></div>
   <div class="next" id="next"></div>
 
   <div class="controls">
@@ -88,7 +106,7 @@
   <div class="status" id="status"></div>
 
   <div class="card">
-    <h2>오늘 종소리 일정</h2>
+    <h2>종소리 일정 <label class="todayToggle"><input type="checkbox" id="todayOnly"> 오늘 요일만 보기</label></h2>
     <div id="list"></div>
   </div>
 
@@ -104,9 +122,10 @@
       </select>
       <button class="primary" id="addBtn">추가</button>
     </div>
+    <div class="days" id="dayPicker"><span class="lab">적용 요일:</span></div>
     <div style="margin-top:14px;">
       <div class="preset-btns">
-        <button class="ghost" data-preset="50">50분 수업 프리셋</button>
+        <button class="ghost" data-preset="50">50분 수업 프리셋(월~금)</button>
         <button class="ghost" data-preset="clear">전체 비우기</button>
       </div>
     </div>
@@ -255,36 +274,68 @@ function playPattern(pattern) {
 }
 
 /* ---------- 일정 관리 ---------- */
+const DOW = ["일", "월", "화", "수", "목", "금", "토"]; // getDay() 0=일 … 6=토
+const WEEKDAYS = [1, 2, 3, 4, 5];            // 월~금
+function defaultSchedule() {
+  // 기본값: 월~금 50분 수업
+  return [
+    { time: "09:00", label: "1교시 시작", pattern: "start", days: [...WEEKDAYS] },
+    { time: "09:50", label: "쉬는 시간", pattern: "break", days: [...WEEKDAYS] },
+    { time: "10:00", label: "2교시 시작", pattern: "start", days: [...WEEKDAYS] },
+    { time: "10:50", label: "쉬는 시간", pattern: "break", days: [...WEEKDAYS] },
+    { time: "11:00", label: "3교시 시작", pattern: "start", days: [...WEEKDAYS] },
+    { time: "11:50", label: "수업 종료", pattern: "end",   days: [...WEEKDAYS] },
+  ];
+}
 function load() {
   try {
     const raw = localStorage.getItem(STORE_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const arr = JSON.parse(raw);
+      // 구버전 호환: days 없으면 매일로 간주
+      arr.forEach(s => { if (!Array.isArray(s.days)) s.days = [0, 1, 2, 3, 4, 5, 6]; });
+      return arr;
+    }
   } catch (e) {}
-  // 기본값: 사용자가 본 그 수업처럼
-  return [
-    { time: "09:00", label: "1교시 시작", pattern: "start" },
-    { time: "09:50", label: "쉬는 시간", pattern: "break" },
-    { time: "10:00", label: "2교시 시작", pattern: "start" },
-    { time: "10:50", label: "쉬는 시간", pattern: "break" },
-    { time: "11:00", label: "3교시 시작", pattern: "start" },
-    { time: "11:50", label: "수업 종료", pattern: "end" },
-  ];
+  return defaultSchedule();
 }
 function save() { localStorage.setItem(STORE_KEY, JSON.stringify(schedule)); }
 function patName(p){ return p === "start" ? "차임 4마디" : p === "break" ? "차임 2마디" : "차임 + 저음"; }
+// 요일 배열 → 사람이 읽는 라벨
+function dayBadge(days) {
+  const d = [...new Set(days)].sort((a, b) => a - b);
+  if (d.length === 7) return "매일";
+  if (d.length === 5 && WEEKDAYS.every(x => d.includes(x))) return "월~금";
+  if (d.length === 2 && d.includes(0) && d.includes(6)) return "주말";
+  if (d.length === 0) return "요일 없음";
+  return d.map(x => DOW[x]).join("");
+}
 
+let todayOnly = false;
 function render() {
   schedule.sort((a,b) => a.time.localeCompare(b.time));
   const list = $("list");
   list.innerHTML = "";
-  if (!schedule.length) { list.innerHTML = '<div class="sub">등록된 시각이 없습니다.</div>'; return; }
-  schedule.forEach((s, i) => {
+  const today = new Date().getDay();
+  const view = todayOnly ? schedule.filter(s => s.days.includes(today)) : schedule;
+  if (!view.length) {
+    list.innerHTML = '<div class="sub">' + (todayOnly ? "오늘 울릴 종이 없습니다." : "등록된 시각이 없습니다.") + '</div>';
+    return;
+  }
+  view.forEach(s => {
+    const isToday = s.days.includes(today);
     const div = document.createElement("div");
-    div.className = "row" + (firedToday.has(s.time + s.label) ? " done" : "");
+    div.className = "row" + (firedToday.has(s.time + s.label) ? " done" : "") + (isToday ? "" : " off");
     div.innerHTML = `<div class="t">${s.time}</div>
-      <div class="lbl">${escapeHtml(s.label)}<div class="pat">${patName(s.pattern)}</div></div>
+      <div class="lbl">${escapeHtml(s.label)}
+        <div class="pat">${patName(s.pattern)}</div>
+        <span class="day-badge">${dayBadge(s.days)}</span></div>
       <button title="삭제">✕</button>`;
-    div.querySelector("button").onclick = () => { schedule.splice(i,1); save(); render(); };
+    div.querySelector("button").onclick = () => {
+      const idx = schedule.indexOf(s);
+      if (idx > -1) schedule.splice(idx, 1);
+      save(); render();
+    };
     list.appendChild(div);
   });
 }
@@ -298,13 +349,18 @@ function tick() {
   const ss = String(now.getSeconds()).padStart(2,"0");
   $("clock").textContent = `${hh}:${mm}:${ss}`;
 
+  const today = now.getDay();
+  $("weekday").textContent = `${DOW[today]}요일`;
+
   const cur = hh + ":" + mm;
+  // 오늘 요일에 해당하는 종만 대상으로
+  const todays = schedule.filter(s => s.days.includes(today));
   // 다음 종 안내
-  const upcoming = schedule.filter(s => s.time > cur).sort((a,b)=>a.time.localeCompare(b.time))[0];
+  const upcoming = todays.filter(s => s.time > cur).sort((a,b)=>a.time.localeCompare(b.time))[0];
   $("next").textContent = upcoming ? `다음: ${upcoming.time}  ${upcoming.label}` : "오늘 남은 종 없음";
 
   if (armed && ss === "00") {
-    schedule.forEach(s => {
+    todays.forEach(s => {
       const key = s.time + s.label;
       if (s.time === cur && !firedToday.has(key)) {
         firedToday.add(key);
@@ -350,28 +406,40 @@ $("permBtn").onclick = () => {
     $("status").textContent = "알림 권한: " + p;
   });
 };
+// 적용 요일 선택기 (일~토). 기본값 월~금
+let pickedDays = new Set(WEEKDAYS);
+function buildDayPicker() {
+  const wrap = $("dayPicker");
+  DOW.forEach((name, idx) => {
+    const b = document.createElement("button");
+    b.className = "day-pill" + (idx === 0 ? " sun" : idx === 6 ? " sat" : "") + (pickedDays.has(idx) ? " on" : "");
+    b.textContent = name;
+    b.onclick = () => {
+      if (pickedDays.has(idx)) pickedDays.delete(idx); else pickedDays.add(idx);
+      b.classList.toggle("on");
+    };
+    wrap.appendChild(b);
+  });
+}
+buildDayPicker();
+
 $("addBtn").onclick = () => {
   const time = $("newTime").value;
   const label = $("newLabel").value.trim() || "종";
   const pattern = $("newPattern").value;
   if (!time) return;
-  schedule.push({ time, label, pattern });
+  if (pickedDays.size === 0) { $("status").textContent = "적용 요일을 하나 이상 선택하세요."; return; }
+  schedule.push({ time, label, pattern, days: [...pickedDays].sort((a,b)=>a-b) });
   save(); render();
   $("newLabel").value = "";
 };
+
+$("todayOnly").onchange = e => { todayOnly = e.target.checked; render(); };
+
 document.querySelectorAll("[data-preset]").forEach(b => b.onclick = () => {
   const p = b.dataset.preset;
   if (p === "clear") { schedule = []; }
-  else if (p === "50") {
-    schedule = [
-      { time: "09:00", label: "1교시 시작", pattern: "start" },
-      { time: "09:50", label: "쉬는 시간", pattern: "break" },
-      { time: "10:00", label: "2교시 시작", pattern: "start" },
-      { time: "10:50", label: "쉬는 시간", pattern: "break" },
-      { time: "11:00", label: "3교시 시작", pattern: "start" },
-      { time: "11:50", label: "수업 종료", pattern: "end" },
-    ];
-  }
+  else if (p === "50") { schedule = defaultSchedule(); }
   save(); render();
 });
 
